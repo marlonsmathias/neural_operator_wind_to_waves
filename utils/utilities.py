@@ -6,42 +6,44 @@ import torch.nn as nn
 from scipy.ndimage import gaussian_filter
 from utils.nn_conv import NNConv_old
 import torch.nn.functional
-from scipy.io import loadmat
+import netCDF4
 import random
 import time
+
 
 device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
 class data_loader():
-    def __init__(self, path):
+  
+  def __init__(self, path,path_bath):  
+    ncdf = netCDF4.Dataset(path)
+    ncdf_bath = netCDF4.Dataset(path_bath)
 
-        # Load data from mat file
-        data = loadmat(path)
-        self.x = data['x'][0]
-        self.y = data['y'][0]
-        self.U0 = data['Y0']
-        self.U1 = data['Y1']
+    self.U1 = np.array(ncdf['shww'])[:2552,0,:51,:63]#For some reason, goes only until 51,63. Lat and Lot seems to be wrong.
 
-        # Define normalization factors and normalize x and y
-        self.norm_x = [self.x[-1]-self.x[0], self.x[0]]
-        self.norm_y = [self.y[-1]-self.y[0], self.y[0]]
-        self.norm_U_0 = max(np.abs(self.U0[:,:,0,:].flatten()))
-        self.norm_U_1 = max(np.abs(self.U0[:,:,1,:].flatten()))
+    wind_u = np.array(ncdf['u10'])[:2552,0,:51,:63]
+    wind_v = np.array(ncdf['v10'])[:2552,0,:51,:63] 
+    bath = np.array(ncdf_bath['wmb'])[:2552,0,:,:]  # Bathymetry
+    self.U0 = np.stack((wind_u,wind_v,bath)) 
 
-        #self.x = (self.x-self.norm_x[1])/self.norm_x[0]
-        #self.y = (self.y-self.norm_y[1])/self.norm_y[0]
-        #self.U0[:,:,0,:] = self.U0[:,:,0,:]/self.norm_U_0
-        #self.U0[:,:,1,:] = self.U0[:,:,1,:]/self.norm_U_1
-        #self.U1[:,:,0,:] = self.U1[:,:,0,:]/self.norm_U_0
-        #self.U1[:,:,1,:] = self.U1[:,:,1,:]/self.norm_U_1
+    self.y = np.array(ncdf_bath['latitude']) # Lat Bathymetry
+    self.x = np.array(ncdf_bath['longitude']) # Lon Bathymetry
 
-        self.domian_boundaries = [self.x[0], self.x[-1], self.y[0], self.y[-1]]
+    #Code for time
+    # time_bath = ncdf_bath['time']    # hours since 1900
+    # time_bath = [datetime.datetime(1900,1,1,0,0,0) + datetime.timedelta(hours=time_bath[i].tolist()) for i in range(len(time_bath))]
 
-        # Create mesh grid
-        [self.y_grid, self.x_grid] = np.meshgrid(self.y,self.x)
+    self.norm_x = [self.x[-1]-self.x[0], self.x[0]]
+    self.norm_y = [self.y[-1]-self.y[0], self.y[0]]
 
-        self.n_mesh = self.x.size * self.y.size
-        self.n_cases = self.U0.shape[-1]
+    self.domian_boundaries = [self.x[0], self.x[-1], self.y[0], self.y[-1]]
+    # Create mesh grid
+    [self.y_grid, self.x_grid] = np.meshgrid(self.y,self.x)
+    self.n_mesh = self.x.size * self.y.size
+    self.n_cases = self.U0.shape[0]
+
+
+
 
     def sample_nodes(self, n_points, n_sample, seed=None):
     # Gets a random sample of n_points points from sample number n_sample
