@@ -15,34 +15,59 @@ device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
 class data_loader():
   
-  def __init__(self, path,path_bath):  
-    ncdf = netCDF4.Dataset(path)
-    ncdf_bath = netCDF4.Dataset(path_bath)
+    def __init__(self, path, path_bath, train_frac=0.8):  
+        ncdf = netCDF4.Dataset(path)
+        ncdf_bath = netCDF4.Dataset(path_bath)
+        n_cases = 2552
+        n_lat = 51
+        n_lon = 63
+        self.radius = 6371000 # Earth radius to convert lat and lon to meters
 
-    self.U1 = np.array(ncdf['shww'])[:2552,0,:51,:63]#For some reason, goes only until 51,63. Lat and Lot seems to be wrong.
+        n_train = int(n_cases*train_frac)
+        inds = list(range(n_cases))
+        random.shuffle(inds)
+        self.ind_train = inds[:n_train]
+        self.ind_val = inds[n_train:]
 
-    wind_u = np.array(ncdf['u10'])[:2552,0,:51,:63]
-    wind_v = np.array(ncdf['v10'])[:2552,0,:51,:63] 
-    bath = np.array(ncdf_bath['wmb'])[:2552,0,:,:]  # Bathymetry
-    self.U0 = np.stack((wind_u,wind_v,bath)) 
+        shww = np.array(ncdf['shww'])[:n_cases,0,:n_lat,:n_lon] #For some reason, goes only until 51,63. Lat and Lot seems to be wrong.
 
-    self.y = np.array(ncdf_bath['latitude']) # Lat Bathymetry
-    self.x = np.array(ncdf_bath['longitude']) # Lon Bathymetry
+        wind_u = np.array(ncdf['u10'])[:n_cases,0,:n_lat,:n_lon]
+        wind_v = np.array(ncdf['v10'])[:n_cases,0,:n_lat,:n_lon] 
+        bath = np.array(ncdf_bath['wmb'])[0,0,:,:]  # Bathymetry
+        #self.U0 = np.stack((wind_u,wind_v,bath)) 
 
-    #Code for time
-    # time_bath = ncdf_bath['time']    # hours since 1900
-    # time_bath = [datetime.datetime(1900,1,1,0,0,0) + datetime.timedelta(hours=time_bath[i].tolist()) for i in range(len(time_bath))]
+        y = np.array(ncdf_bath['latitude']) # Lat Bathymetry
+        x = np.array(ncdf_bath['longitude']) # Lon Bathymetry
 
-    self.norm_x = [self.x[-1]-self.x[0], self.x[0]]
-    self.norm_y = [self.y[-1]-self.y[0], self.y[0]]
+        # self.domain_boundaries = [self.x[0], self.x[-1], self.y[0], self.y[-1]]
+        # Create mesh grid
+        [self.y_grid, self.x_grid] = np.meshgrid(y,x)
 
-    self.domian_boundaries = [self.x[0], self.x[-1], self.y[0], self.y[-1]]
-    # Create mesh grid
-    [self.y_grid, self.x_grid] = np.meshgrid(self.y,self.x)
-    self.n_mesh = self.x.size * self.y.size
-    self.n_cases = self.U0.shape[0]
+        n_grid = n_lat*n_lon
+        self.n_cases = n_cases
 
+        self.x = self.x_grid.flatten()
+        self.y = self.y_grid.flatten()
+        self.wind_u = wind_u.transpose(1,2,0).reshape((n_grid,self.n_cases))
+        self.wind_v = wind_v.transpose(1,2,0).reshape((n_grid,self.n_cases))
+        self.bath = bath.flatten()
+        self.shww = shww.transpose(1,2,0).reshape((n_grid,self.n_cases))
 
+        is_land = self.bath < 0
+
+        self.x = np.delete(self.x,is_land,axis=0)
+        self.y = np.delete(self.y,is_land,axis=0)
+        self.wind_u = np.delete(self.wind_u,is_land,axis=0)
+        self.wind_v = np.delete(self.wind_v,is_land,axis=0)
+        self.bath = np.delete(self.bath,is_land,axis=0)
+        self.shww = np.delete(self.shww,is_land,axis=0)
+
+        self.n_nodes = len(self.x)
+
+        self.dist_norm = 1./((max(self.x) - min(self.x)) * np.pi/180. * self.radius)
+        self.bath_norm = 1./999.
+        self.wind_norm = 1./(np.std(self.wind_u[:,self.ind_train]))
+        self.shww_norm = 1./(np.std(self.shww[:,self.ind_train]))
 
 
     def sample_nodes(self, n_points, n_sample, seed=None):
