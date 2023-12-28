@@ -29,6 +29,9 @@ class data_loader():
         self.ind_train = inds[:n_train]
         self.ind_val = inds[n_train:]
 
+        self.n_train = n_train
+        self.n_val = n_cases-n_train
+
         shww = np.array(ncdf['shww'])[:n_cases,0,:n_lat,:n_lon] #For some reason, goes only until 51,63. Lat and Lot seems to be wrong.
 
         wind_u = np.array(ncdf['u10'])[:n_cases,0,:n_lat,:n_lon]
@@ -119,45 +122,8 @@ class data_loader():
             edge_attributes = np.vstack((edge_attributes, self.dist_norm*np.stack((ds[inds],dx,dy),axis=1)))
 
 
-        return Data(F=torch.tensor(F, dtype=torch.float),
-                    G=torch.tensor(G, dtype=torch.float),
-                    edge_index=torch.tensor(edge_index, dtype=torch.long),
+        return Data(x=torch.tensor(F, dtype=torch.float),
+                    y=torch.tensor(G, dtype=torch.float),
+                    edge_index=torch.tensor(edge_index, dtype=torch.long).t(),
                     edge_attr=torch.tensor(edge_attributes, dtype=torch.float),
                     coords=X)
-
-def spherical_distance(lat1,lat2,lon1,lon2,radius):
-    dx = radius * (lon1-lon2)*np.cos(lon1)
-    dy = radius * (lat1-lat2)
-    ds = radius * np.arccos(np.sin(lat1)*np.sin(lat2)+np.cos(lat1)*np.cos(lat2)*np.cos(lon1-lon2))
-
-    return dx, dy, ds
-
-def save_model(model, pars, ls, memory_use, start_time=None, save_path=None, epoch=None, seed=None, comment=''):
-    if epoch is None:
-        epoch_text = ''
-    else:
-        epoch_text = f'_e{epoch}'
-
-    if seed is None:
-        seed_text = ''
-    else:
-        seed_text = f'_s{seed}'
-
-    if save_path is None:
-        save_path = f"models/model_nm{pars['mesh']['n_min']}_{pars['mesh']['n_max']}_r{pars['mesh']['radius']}_w{pars['model']['width']}_kw{pars['model']['kernel_width']}_d{pars['model']['depth']}{epoch_text}{seed_text}{comment}.pt"
-
-
-
-    if start_time is None:
-        run_time = None
-    else:
-        run_time = time.time()-start_time
-
-    torch.save({'model': model.state_dict(), 'pars':pars, 'loss':ls, 'time':run_time, 'memory':memory_use}, save_path)
-
-def randintlog(n1,n2):
-    # Random integer between n1 and n2 with logarithmic distribution
-    l1 = np.log(n1)
-    l2 = np.log(n2)
-    r = l1 + (l2-l1)*random.random()
-    return(int(np.exp(r)))

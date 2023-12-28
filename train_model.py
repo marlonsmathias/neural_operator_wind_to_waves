@@ -5,8 +5,9 @@ import argparse
 import torch.nn.functional as F
 
 from torch_geometric.loader import DataLoader
-from utils.utilities import *
+from utils.dataloader import *
 from utils.nop import *
+from utils.utils import *
 from typing import Dict
 
 import time
@@ -22,22 +23,27 @@ def get_args():
     
     parser.add_argument('--datapath',
                         type=str,
-                        default='data/datasetTPN.mat',
+                        default='data/era5_Santos_2022-2023.nc',
+                        help='Use to manually select the data file name') 
+    
+    parser.add_argument('--bathpath',
+                        type=str,
+                        default='data/era5_Santos_2022-2023_bath.nc',
                         help='Use to manually select the data file name') 
     
     parser.add_argument('--mesh_n_min',
                         type=int,
-                        default=1000,
+                        default=250,
                         help='Number of mesh points')
 
     parser.add_argument('--mesh_n_max',
                         type=int,
-                        default=2500,
+                        default=1000,
                         help='Number of mesh points')
 
     parser.add_argument('--radius',
                         type=float,
-                        default=3.0,
+                        default=500.e3,
                         help='Maximum edge length in the graph')
 
     parser.add_argument('--model_width',
@@ -57,7 +63,7 @@ def get_args():
     
     parser.add_argument('--epochs',
                         type=int,
-                        default=10000,
+                        default=100,
                         help='Maximum number of epochs for training')
 
     parser.add_argument('--patience',
@@ -70,9 +76,9 @@ def get_args():
                         default=1,
                         help='')
 
-    parser.add_argument('--n_samples',
-                        type=int,
-                        default=80,
+    parser.add_argument('--trainfrac',
+                        type=float,
+                        default=0.8,
                         help='')
 
     parser.add_argument('--lr',
@@ -117,6 +123,8 @@ pars = dict()
 
 # Data
 pars['data_path'] = args.datapath
+pars['bath_path'] = args.bathpath
+pars['train_frac'] = args.trainfrac
 
 pars['mesh'] = {
     'n_min': args.mesh_n_min, # Minimum number of sample nodes in the domain
@@ -132,7 +140,6 @@ pars['model'] = {
 # Training
 pars['train'] = {
     'batch_size': args.batch_size,
-    'n_samples': args.n_samples,
     'epochs': args.epochs,
     'patience': args.patience,
     'learning_rate': args.lr,
@@ -149,20 +156,20 @@ if args.seed is not None:
     random.seed(args.seed)
 
 # Set up model
-model = KernelNN(pars['model']['width'], pars['model']['kernel_width'], pars['model']['depth'], 1, in_width=2, out_width=2).to(device)
+model = KernelNN(pars['model']['width'], pars['model']['kernel_width'], pars['model']['depth'], 3, in_width=3, out_width=1).to(device)
 optimizer = torch.optim.Adam(model.parameters(), lr=pars['train']['learning_rate'], weight_decay=5e-4)
 scheduler = torch.optim.lr_scheduler.StepLR(optimizer, step_size=pars['train']['scheduler_step'], gamma=pars['train']['scheduler_gamma'])
 
 # Load data and generate meshes
-d = data_loader(pars['data_path'])
+d = data_loader(pars['data_path'],pars['bath_path'],pars['train_frac'])
 data_train = []
-for i in range(pars['train']['n_samples']):
+for i in range(d.n_train):
 
     n = randintlog(pars['mesh']['n_min'],pars['mesh']['n_max'])
 
-    data_train.append(d.sample_mesh(n, i, radius=pars['mesh']['radius']))
+    data_train.append(d.sample_graph(n, i, radius=pars['mesh']['radius']))
 
-    print(f'Sample: {i}, Nodes: {n}, Edges: {data_train[-1].edge_index.shape[1]}')
+    print(f'Sample: {i} of {d.n_train}, Nodes: {n}, Edges: {data_train[-1].edge_index.shape[1]}')
 
 loader_train = DataLoader(data_train, batch_size=pars['train']['batch_size'], shuffle=True)
 
@@ -188,7 +195,7 @@ for epoch in range(pars['train']['epochs']):
         mse.backward()
 
         optimizer.step()
-        train_mse += mse.item()/pars['train']['n_samples']
+        train_mse += mse.item()/d.n_train
 
     print(epoch)
     print(train_mse)
