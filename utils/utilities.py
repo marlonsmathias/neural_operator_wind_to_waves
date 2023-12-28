@@ -1,121 +1,136 @@
 import torch
 import numpy as np
-import sklearn.metrics
 from torch_geometric.data import Data
 import torch.nn as nn
 from scipy.ndimage import gaussian_filter
 from utils.nn_conv import NNConv_old
 import torch.nn.functional
-from scipy.io import loadmat
+import netCDF4
 import random
 import time
+from sklearn.metrics import pairwise_distances
+
 
 device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
 class data_loader():
-    def __init__(self, path):
+  
+    def __init__(self, path, path_bath, train_frac=0.8):  
+        ncdf = netCDF4.Dataset(path)
+        ncdf_bath = netCDF4.Dataset(path_bath)
+        n_cases = 2552
+        n_lat = 51
+        n_lon = 63
+        self.radius = 6371000 # Earth radius to convert lat and lon to meters
 
-        # Load data from mat file
-        data = loadmat(path)
-        self.x = data['x'][0]
-        self.y = data['y'][0]
-        self.U0 = data['Y0']
-        self.U1 = data['Y1']
+        n_train = int(n_cases*train_frac)
+        inds = list(range(n_cases))
+        random.shuffle(inds)
+        self.ind_train = inds[:n_train]
+        self.ind_val = inds[n_train:]
 
-        # Define normalization factors and normalize x and y
-        self.norm_x = [self.x[-1]-self.x[0], self.x[0]]
-        self.norm_y = [self.y[-1]-self.y[0], self.y[0]]
-        self.norm_U_0 = max(np.abs(self.U0[:,:,0,:].flatten()))
-        self.norm_U_1 = max(np.abs(self.U0[:,:,1,:].flatten()))
+        shww = np.array(ncdf['shww'])[:n_cases,0,:n_lat,:n_lon] #For some reason, goes only until 51,63. Lat and Lot seems to be wrong.
 
-        #self.x = (self.x-self.norm_x[1])/self.norm_x[0]
-        #self.y = (self.y-self.norm_y[1])/self.norm_y[0]
-        #self.U0[:,:,0,:] = self.U0[:,:,0,:]/self.norm_U_0
-        #self.U0[:,:,1,:] = self.U0[:,:,1,:]/self.norm_U_1
-        #self.U1[:,:,0,:] = self.U1[:,:,0,:]/self.norm_U_0
-        #self.U1[:,:,1,:] = self.U1[:,:,1,:]/self.norm_U_1
+        wind_u = np.array(ncdf['u10'])[:n_cases,0,:n_lat,:n_lon]
+        wind_v = np.array(ncdf['v10'])[:n_cases,0,:n_lat,:n_lon] 
+        bath = np.array(ncdf_bath['wmb'])[0,0,:,:]  # Bathymetry
 
-        self.domian_boundaries = [self.x[0], self.x[-1], self.y[0], self.y[-1]]
+        y = np.array(ncdf_bath['latitude']) # Lat Bathymetry
+        x = np.array(ncdf_bath['longitude']) # Lon Bathymetry
 
         # Create mesh grid
-        [self.y_grid, self.x_grid] = np.meshgrid(self.y,self.x)
+        [self.y_grid, self.x_grid] = np.meshgrid(y,x)
 
-        self.n_mesh = self.x.size * self.y.size
-        self.n_cases = self.U0.shape[-1]
+        n_grid = n_lat*n_lon
+        self.n_cases = n_cases
 
-    def sample_nodes(self, n_points, n_sample, seed=None):
-    # Gets a random sample of n_points points from sample number n_sample
-    # Returns X and Y. Both with n_points lines
-    # X is the input and has 4 columns, which are respectivelly x, y, U and U_prime (at the initial time)
-    # Y is the output and has 2 columns, which are respectivelly U and U_prime (at the final time)
+        self.lon = self.x_grid.flatten()
+        self.lat = self.y_grid.flatten()
+        self.wind_u = wind_u.transpose(1,2,0).reshape((n_grid,self.n_cases))
+        self.wind_v = wind_v.transpose(1,2,0).reshape((n_grid,self.n_cases))
+        self.bath = bath.flatten()
+        self.shww = shww.transpose(1,2,0).reshape((n_grid,self.n_cases))
+
+        is_land = self.bath < 0
+
+        self.lon = np.delete(self.lon,is_land,axis=0)
+        self.lat = np.delete(self.lat,is_land,axis=0)
+        self.wind_u = np.delete(self.wind_u,is_land,axis=0)
+        self.wind_v = np.delete(self.wind_v,is_land,axis=0)
+        self.bath = np.delete(self.bath,is_land,axis=0)
+        self.shww = np.delete(self.shww,is_land,axis=0)
+
+        self.n_nodes = len(self.lat)
+
+        self.dist_norm = 1./((max(self.lat) - min(self.lat)) * np.pi/180. * self.radius)
+        self.bath_norm = 1./999.
+        self.wind_norm = 1./(np.std(self.wind_u[:,self.ind_train]))
+        self.shww_norm = 1./(np.std(self.shww[:,self.ind_train]))
+
+
+    def sample_graph(self, n_vertices, sample_n, radius=0, n_connections=0, validation=False, seed=None):
+    # Samples a pair F and G from the dataset. Both functions are represented by graphs
+    # Gets a random sample of n_vertices points from sample number sample_n from either the training or the validation data sets
+    # F is a R2 -> R3 function, such that F = F(x,y) = [wind_u, wind_v, bath]^T
+    # G is a R2 -> R1 function, such that G = G(x) = shww
+    # Each vertice in the graph connects to the closest n_connections vertices within radius (whichever is larger)
 
         if seed is not None:
             random.seed(seed)
 
-        inds = random.sample(range(0,self.n_mesh), n_points)
-
-        x = self.x_grid.flatten()[inds]
-        y = self.y_grid.flatten()[inds]
-
-        U0_1 = self.U0[:,:,0,n_sample].flatten()[inds]
-        U0_2 = self.U0[:,:,1,n_sample].flatten()[inds]
-
-        U1_1 = self.U1[:,:,0,n_sample].flatten()[inds]
-        U1_2 = self.U1[:,:,1,n_sample].flatten()[inds]
-
-        X = np.transpose(np.vstack((x,y,U0_1,U0_2)))
-        Y = np.transpose(np.vstack((U1_1,U1_2)))
-
-        return X, Y
-
-    def sample_mesh(self, n_points, n_sample, radius=0, n_connections=0, seed=None, nodes=None):
-    # Generates a mesh from a random sample
-    # The neighborhood of each node is defined by a radius and by the number of connections, whichever creates the largest neighborhood
-    # Returns a Torch Geometric Data object with the mesh
-
-        # By default, the nodes are not provided, so we must first sample them
-        if nodes is None:
-            X, Y = self.sample_nodes(n_points, n_sample, seed=seed)
+        if validation == False:
+            case_ind = self.ind_train[sample_n]
         else:
-            X = nodes['X']
-            Y = nodes['Y']
-            n_points = X.shape[0]
+            case_ind = self.ind_val[sample_n]
 
-        # Create mirrored version of domain: just one copy of each side is used as needing more is unrealistic
-        X_left = [2*self.domian_boundaries[0], 0, 0, 0] + X*[-1, 1, 1, 1]
-        X_right = [2*self.domian_boundaries[1], 0, 0, 0] + X*[-1, 1, 1, 1]
-        X_middle = np.vstack((X,X_left,X_right))
+        vert_inds = random.sample(range(0,self.n_nodes), n_vertices)
 
-        X_bottom = [0, 2*self.domian_boundaries[2], 0, 0] + X*[1, -1, 1, 1]
-        X_top = [0, 2*self.domian_boundaries[3], 0, 0] + X*[1, -1, 1, 1]
-        X_mirror = np.vstack((X_middle,X_bottom,X_top))
+        lon = self.lon[vert_inds]
+        lat = self.lat[vert_inds]
 
-        # Compute pairwise distances
-        dx = np.transpose([X[:,0]]) - X_mirror[:,0]
-        dy = np.transpose([X[:,1]]) - X_mirror[:,1]
-        D = np.sqrt(dx**2 + dy**2)
+        wind_u = self.wind_u[vert_inds,case_ind]*self.wind_norm
+        wind_v = self.wind_v[vert_inds,case_ind]*self.wind_norm
+        bath = self.bath[vert_inds]*self.bath_norm
 
-        edge_index = np.zeros([2,0])
-        edge_attributes = np.zeros([1,0])
+        shww = self.shww[vert_inds,case_ind]*self.shww_norm
+
+        F = np.stack((wind_u,wind_v,bath),axis=1)
+        G = shww
+        X = np.stack((lat,lon),axis=1)
+
+        DS = pairwise_distances(np.radians(X), metric='haversine') * self.radius
+        edge_index = np.zeros([0,2])
+        edge_attributes = np.zeros([0,3])
 
         # Iterate nodes
-        for i in range(n_points):
-            d = D[i,:]
-            inds = np.argsort(d)
-            if d[inds[n_connections]] > radius: # If n_connections creates the largest neighborhood
+        for i in range(n_vertices):
+            ds = DS[i,:]
+            inds = np.argsort(ds)
+            if ds[inds[n_connections]] > radius: # If n_connections creates the largest neighborhood
                 inds = inds[0:n_connections]
             else: # If radius creates the largest neighborhood
-                inds = inds[d[inds]<=radius]
+                inds = inds[ds[inds]<=radius]
 
-            edge_index = np.hstack((edge_index, np.vstack((i*np.ones(len(inds)), inds%n_points)))) # Add index of edges to array
-            edge_attributes = np.hstack((edge_attributes, d[inds].reshape(1,-1)))
+            edge_index = np.vstack((edge_index, np.stack((i*np.ones(len(inds)), inds),axis=1))) # Add index of edges to array
 
-        return Data(x=torch.tensor(X[:,[2,3]], dtype=torch.float),
-                    y=torch.tensor(Y, dtype=torch.float),
+            dx = self.radius * np.radians(lon[inds] - lon[i]) * np.cos(np.radians(lat[i]))
+            dy = self.radius * np.radians(lat[inds] - lat[i])
+
+            edge_attributes = np.vstack((edge_attributes, self.dist_norm*np.stack((ds[inds],dx,dy),axis=1)))
+
+
+        return Data(F=torch.tensor(F, dtype=torch.float),
+                    G=torch.tensor(G, dtype=torch.float),
                     edge_index=torch.tensor(edge_index, dtype=torch.long),
-                    edge_attr=torch.tensor(edge_attributes, dtype=torch.float).t(),
-                    norm_x=self.norm_x, norm_y=self.norm_y,
-                    coords=X[:,[0,1]])#, norm_U = self.norm_U)
+                    edge_attr=torch.tensor(edge_attributes, dtype=torch.float),
+                    coords=X)
+
+def spherical_distance(lat1,lat2,lon1,lon2,radius):
+    dx = radius * (lon1-lon2)*np.cos(lon1)
+    dy = radius * (lat1-lat2)
+    ds = radius * np.arccos(np.sin(lat1)*np.sin(lat2)+np.cos(lat1)*np.cos(lat2)*np.cos(lon1-lon2))
+
+    return dx, dy, ds
 
 def save_model(model, pars, ls, memory_use, start_time=None, save_path=None, epoch=None, seed=None, comment=''):
     if epoch is None:
