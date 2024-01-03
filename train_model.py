@@ -43,7 +43,7 @@ def get_args():
 
     parser.add_argument('--radius',
                         type=float,
-                        default=500.e3,
+                        default=1000.e3,
                         help='Maximum edge length in the graph')
 
     parser.add_argument('--model_width',
@@ -53,12 +53,12 @@ def get_args():
 
     parser.add_argument('--model_kernel_width',
                         type=int,
-                        default=18,
+                        default=32,
                         help='')
 
     parser.add_argument('--model_depth',
                         type=int,
-                        default=5,
+                        default=2,
                         help='')
     
     parser.add_argument('--epochs',
@@ -73,7 +73,7 @@ def get_args():
 
     parser.add_argument('--batch_size',
                         type=int,
-                        default=1,
+                        default=20,
                         help='')
 
     parser.add_argument('--trainfrac',
@@ -83,7 +83,7 @@ def get_args():
 
     parser.add_argument('--lr',
                         type=float,
-                        default=1e-3,
+                        default=1e-2,
                         help='Learning rate for the optimization algorithm')
 
     parser.add_argument('--scheduler_step',
@@ -169,9 +169,19 @@ for i in range(d.n_train):
 
     data_train.append(d.sample_graph(n, i, radius=pars['mesh']['radius']))
 
-    print(f'Sample: {i} of {d.n_train}, Nodes: {n}, Edges: {data_train[-1].edge_index.shape[1]}')
+    print(f'Train sample: {i} of {d.n_train}, Nodes: {n}, Edges: {data_train[-1].edge_index.shape[1]}')
+
+data_val = []
+for i in range(d.n_val):
+
+    n = randintlog(pars['mesh']['n_min'],pars['mesh']['n_max'])
+
+    data_val.append(d.sample_graph(n, i, radius=pars['mesh']['radius'],validation=True))
+
+    print(f'Validation sample: {i} of {d.n_val}, Nodes: {n}, Edges: {data_val[-1].edge_index.shape[1]}')
 
 loader_train = DataLoader(data_train, batch_size=pars['train']['batch_size'], shuffle=True)
+loader_val = DataLoader(data_val, batch_size=pars['train']['batch_size'], shuffle=False)
 
 
 # -----------------------------------------
@@ -185,31 +195,40 @@ loss_min = 1e10
 loss_min_epoch = 0
 
 for epoch in range(pars['train']['epochs']):
-    train_mse = 0.
+    train_loss = 0.
+    val_loss = 0.
     for batch in loader_train:
         batch = batch.to(device)
 
         optimizer.zero_grad()
         out = model(batch)
-        mse = F.mse_loss(out.view(-1, 1), batch.y.view(-1,1))
-        mse.backward()
+        loss = F.mse_loss(out.view(-1, 1), batch.y.view(-1, 1))
+        loss.backward()
 
         optimizer.step()
-        train_mse += mse.item()/d.n_train
+        train_loss += loss.item()/d.n_train
 
-    print(epoch)
-    print(train_mse)
+    with torch.no_grad():
+        for batch in loader_val:
+            batch = batch.to(device)
+
+            out = model(batch)
+            loss = F.mse_loss(out.view(-1, 1), batch.y.view(-1, 1))
+
+            val_loss += loss.item()/d.n_val
+
+    print(f'Epoch: {epoch}, Train_loss: {train_loss}, Validation_loss: {val_loss}')
 
     scheduler.step()
 
-    ls.append(train_mse)
+    ls.append(train_loss)
 
-    if (epoch+1)%100==0:
+    if (epoch+1)%10==0:
         memory_use = torch.cuda.max_memory_allocated(device)/(1024*1024)
         save_model(model, pars, ls, memory_use, start_time=start_time, seed=args.seed, comment=args.comment)
 
-    if train_mse < loss_min:
-        loss_min = train_mse
+    if train_loss < loss_min:
+        loss_min = train_loss
         loss_min_epoch = epoch
     elif epoch - loss_min_epoch > pars['train']['patience']:
         memory_use = torch.cuda.max_memory_allocated(device)/(1024*1024)

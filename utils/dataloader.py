@@ -15,7 +15,12 @@ device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
 class data_loader():
   
-    def __init__(self, path, path_bath, train_frac=0.8):  
+    def __init__(self, path, path_bath, train_frac=0.8, seed=0):  
+
+        # Set random seed
+        if seed is not None:
+            random.seed(seed)
+
         ncdf = netCDF4.Dataset(path)
         ncdf_bath = netCDF4.Dataset(path_bath)
         n_cases = 2552
@@ -49,10 +54,10 @@ class data_loader():
 
         self.lon = self.x_grid.flatten()
         self.lat = self.y_grid.flatten()
-        self.wind_u = wind_u.transpose(1,2,0).reshape((n_grid,self.n_cases))
-        self.wind_v = wind_v.transpose(1,2,0).reshape((n_grid,self.n_cases))
-        self.bath = bath.flatten()
-        self.shww = shww.transpose(1,2,0).reshape((n_grid,self.n_cases))
+        self.wind_u = wind_u.transpose(2,1,0).reshape((n_grid,self.n_cases))
+        self.wind_v = wind_v.transpose(2,1,0).reshape((n_grid,self.n_cases))
+        self.bath = bath.transpose(1,0).flatten()
+        self.shww = shww.transpose(2,1,0).reshape((n_grid,self.n_cases))
 
         is_land = self.bath < 0
 
@@ -99,7 +104,7 @@ class data_loader():
 
         F = np.stack((wind_u,wind_v,bath),axis=1)
         G = shww
-        X = np.stack((lat,lon),axis=1)
+        X = np.stack((lon,lat),axis=1)
 
         DS = pairwise_distances(np.radians(X), metric='haversine') * self.radius
         edge_index = np.zeros([0,2])
