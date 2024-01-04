@@ -128,7 +128,7 @@ if __name__ == '__main__':
         wandb.log({
             'epoch': epoch, 
             'train_loss': train_loss, 
-            'val_mse': val_loss
+            'val_loss': val_loss
         })
 
         if train_loss < loss_min:
