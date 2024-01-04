@@ -69,13 +69,13 @@ if __name__ == '__main__':
     d = data_loader(pars['data_path'],pars['bath_path'],pars['train_frac'])
 
     print('Loading train samples')
-    @parfor(range(d.n_train), nP=num_workers)
+    @parfor(range(d.n_train))
     def data_train(i):
         n = randintlog(pars['mesh']['n_min'],pars['mesh']['n_max'])
         return d.sample_graph(n, i, radius=pars['mesh']['radius'])
 
     print('Loading validation samples')
-    @parfor(range(d.n_val), nP=num_workers)
+    @parfor(range(d.n_val))
     def data_val(i):
         n = randintlog(pars['mesh']['n_min'],pars['mesh']['n_max'])
         return d.sample_graph(n, i, radius=pars['mesh']['radius'],validation=True)
