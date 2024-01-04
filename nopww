@@ -1,7 +1,7 @@
 #!/bin/bash -l
 
 # Define a job array
-#SBATCH --array=4
+#SBATCH --array=1-4
 
 # Set the slurm output file, this is where all command line output is redirected to. %j is replaced by the job id
 #SBATCH --output=slurm_out_%A_%a.txt
@@ -13,6 +13,7 @@
 
 # Sepecify the partition (arandu for the DGX-A100 and devwork for the workstations)
 #SBATCH -p arandu
+# #SBATCH -w c4aiscw5
 
 # Print the name of the worker node to the output file
 echo "Running on"

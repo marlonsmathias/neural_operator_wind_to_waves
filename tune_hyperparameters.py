@@ -88,15 +88,6 @@ if __name__ == '__main__':
     loader_train = DataLoader(data_train, batch_size=pars['train']['batch_size'], shuffle=True)
     loader_val = DataLoader(data_val, batch_size=pars['train']['batch_size'], shuffle=False)
 
-    print('Loading train samples')
-    #@parfor(range(d.n_train))
-    def loader_train(i):
-        n = randintlog(pars['mesh']['n_min'],pars['mesh']['n_max'])
-        return d.sample_graph(n, i, radius=pars['mesh']['radius'])
-    
-    data_train = Parallel(n_jobs=2)(delayed(loader_train)(i) for i in range(range(d.n_train))) 
-
-
     # -----------------------------------------
     # TRAINING
     ls = []
