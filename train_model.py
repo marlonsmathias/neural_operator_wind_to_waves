@@ -44,7 +44,7 @@ def get_args():
 
     parser.add_argument('--radius',
                         type=float,
-                        default=500.,
+                        default=300.,
                         help='Maximum edge length in the graph')
 
     parser.add_argument('--model_width',
@@ -59,7 +59,7 @@ def get_args():
 
     parser.add_argument('--model_depth',
                         type=int,
-                        default=3,
+                        default=4,
                         help='')
     
     parser.add_argument('--epochs',
@@ -165,7 +165,7 @@ if __name__ == '__main__':
         random.seed(args.seed)
 
     # Set up model
-    model = KernelNN(pars['model']['width'], pars['model']['kernel_width'], pars['model']['depth'], 3, in_width=5, out_width=1).to(device)
+    model = KernelNN(pars['model']['width'], pars['model']['kernel_width'], pars['model']['depth'], 3, in_width=3, out_width=1).to(device)
     optimizer = torch.optim.Adam(model.parameters(), lr=pars['train']['learning_rate'], weight_decay=5e-4)
     scheduler = torch.optim.lr_scheduler.StepLR(optimizer, step_size=pars['train']['scheduler_step'], gamma=pars['train']['scheduler_gamma'])
 

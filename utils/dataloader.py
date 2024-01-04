@@ -109,7 +109,8 @@ class data_loader():
 
         shww = self.shww[vert_inds,case_ind]*self.shww_norm
 
-        F = np.stack((wind_u,wind_v,bath,lon,lat),axis=1)
+        #F = np.stack((wind_u,wind_v,bath,lon,lat),axis=1)
+        F = np.stack((wind_u,wind_v,bath),axis=1)
         G = shww
         X = np.stack((lat,lon),axis=1)
 
