@@ -17,6 +17,8 @@
 # Print the name of the worker node to the output file
 echo "Running on"
 hostname
+echo "GPU $CUDA_VISIBLE_DEVICES"
+
 
 # Build image
 #cd /home/marlonm/neural_operator_wind_to_waves
