@@ -1,6 +1,7 @@
 data/*
 models/*
 wandb/*
+keys.sh
 
 # Byte-compiled / optimized / DLL files
 __pycache__/
