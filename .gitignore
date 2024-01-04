@@ -2,6 +2,7 @@ data/*
 models/*
 wandb/*
 keys.sh
+slurm_out*
 
 # Byte-compiled / optimized / DLL files
 __pycache__/
