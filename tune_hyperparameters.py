@@ -1,7 +1,8 @@
 import torch
 import numpy as np
 import argparse
-from parfor import parfor
+#from parfor import parfor
+from joblib import Parallel, delayed
 
 import torch.nn.functional as F
 
@@ -50,6 +51,8 @@ if __name__ == '__main__':
 
     device = 'cuda'
 
+    num_workers = 16
+
     # -----------------------------------------
     # PRE-PROCESSING
 
@@ -67,19 +70,31 @@ if __name__ == '__main__':
     d = data_loader(pars['data_path'],pars['bath_path'],pars['train_frac'])
 
     print('Loading train samples')
-    @parfor(range(d.n_train))
-    def data_train(i):
+    #@parfor(range(d.n_train))
+    def func_loader_train(i):
         n = randintlog(pars['mesh']['n_min'],pars['mesh']['n_max'])
         return d.sample_graph(n, i, radius=pars['mesh']['radius'])
+    
+    data_train = Parallel(n_jobs=num_workers)(delayed(func_loader_train)(i) for i in range(d.n_train)) 
 
     print('Loading validation samples')
-    @parfor(range(d.n_val))
-    def data_val(i):
+    #@parfor(range(d.n_val))
+    def func_loader_val(i):
         n = randintlog(pars['mesh']['n_min'],pars['mesh']['n_max'])
         return d.sample_graph(n, i, radius=pars['mesh']['radius'],validation=True)
+    
+    data_val = Parallel(n_jobs=num_workers)(delayed(func_loader_train)(i) for i in range(d.n_val)) 
 
     loader_train = DataLoader(data_train, batch_size=pars['train']['batch_size'], shuffle=True)
     loader_val = DataLoader(data_val, batch_size=pars['train']['batch_size'], shuffle=False)
+
+    print('Loading train samples')
+    #@parfor(range(d.n_train))
+    def loader_train(i):
+        n = randintlog(pars['mesh']['n_min'],pars['mesh']['n_max'])
+        return d.sample_graph(n, i, radius=pars['mesh']['radius'])
+    
+    data_train = Parallel(n_jobs=2)(delayed(loader_train)(i) for i in range(range(d.n_train))) 
 
 
     # -----------------------------------------
