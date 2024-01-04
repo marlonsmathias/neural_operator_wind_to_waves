@@ -1,6 +1,7 @@
 import torch
 import numpy as np
 import argparse
+from parfor import parfor
 
 import torch.nn.functional as F
 
@@ -33,7 +34,7 @@ def get_args():
     
     parser.add_argument('--mesh_n_min',
                         type=int,
-                        default=250,
+                        default=500,
                         help='Number of mesh points')
 
     parser.add_argument('--mesh_n_max',
@@ -43,22 +44,22 @@ def get_args():
 
     parser.add_argument('--radius',
                         type=float,
-                        default=1000.e3,
+                        default=500.,
                         help='Maximum edge length in the graph')
 
     parser.add_argument('--model_width',
                         type=int,
-                        default=16,
+                        default=10,
                         help='')
 
     parser.add_argument('--model_kernel_width',
                         type=int,
-                        default=32,
+                        default=20,
                         help='')
 
     parser.add_argument('--model_depth',
                         type=int,
-                        default=2,
+                        default=3,
                         help='')
     
     parser.add_argument('--epochs',
@@ -73,12 +74,17 @@ def get_args():
 
     parser.add_argument('--batch_size',
                         type=int,
-                        default=20,
+                        default=10,
                         help='')
 
     parser.add_argument('--trainfrac',
                         type=float,
                         default=0.8,
+                        help='')
+    
+    parser.add_argument('--distance_to_sea',
+                        type=float,
+                        default=300.,
                         help='')
 
     parser.add_argument('--lr',
@@ -118,119 +124,117 @@ def get_args():
 # -----------------------------------------
 # PARAMETERS
 
-args = get_args()
-pars = dict()
+if __name__ == '__main__':
 
-# Data
-pars['data_path'] = args.datapath
-pars['bath_path'] = args.bathpath
-pars['train_frac'] = args.trainfrac
+    args = get_args()
+    pars = dict()
 
-pars['mesh'] = {
-    'n_min': args.mesh_n_min, # Minimum number of sample nodes in the domain
-    'n_max': args.mesh_n_max, # Maximum number of sample nodes in the domain
-    'radius': args.radius} # Maximum edge length in the graph
+    # Data
+    pars['data_path'] = args.datapath
+    pars['bath_path'] = args.bathpath
+    pars['train_frac'] = args.trainfrac
 
-# Model
-pars['model'] = {
-    'width': args.model_width,
-    'kernel_width': args.model_kernel_width,
-    'depth': args.model_depth}
+    pars['mesh'] = {
+        'n_min': args.mesh_n_min, # Minimum number of sample nodes in the domain
+        'n_max': args.mesh_n_max, # Maximum number of sample nodes in the domain
+        'radius': args.radius} # Maximum edge length in the graph
 
-# Training
-pars['train'] = {
-    'batch_size': args.batch_size,
-    'epochs': args.epochs,
-    'patience': args.patience,
-    'learning_rate': args.lr,
-    'scheduler_step': args.scheduler_step,
-    'scheduler_gamma': args.scheduler_gamma}
+    # Model
+    pars['model'] = {
+        'width': args.model_width,
+        'kernel_width': args.model_kernel_width,
+        'depth': args.model_depth}
 
-device = args.dev
+    # Training
+    pars['train'] = {
+        'distance_to_sea' : args.distance_to_sea,
+        'batch_size': args.batch_size,
+        'epochs': args.epochs,
+        'patience': args.patience,
+        'learning_rate': args.lr,
+        'scheduler_step': args.scheduler_step,
+        'scheduler_gamma': args.scheduler_gamma}
 
-# -----------------------------------------
-# PRE-PROCESSING
+    device = args.dev
 
-# Set random seed
-if args.seed is not None:
-    random.seed(args.seed)
+    # -----------------------------------------
+    # PRE-PROCESSING
 
-# Set up model
-model = KernelNN(pars['model']['width'], pars['model']['kernel_width'], pars['model']['depth'], 3, in_width=3, out_width=1).to(device)
-optimizer = torch.optim.Adam(model.parameters(), lr=pars['train']['learning_rate'], weight_decay=5e-4)
-scheduler = torch.optim.lr_scheduler.StepLR(optimizer, step_size=pars['train']['scheduler_step'], gamma=pars['train']['scheduler_gamma'])
+    # Set random seed
+    if args.seed is not None:
+        random.seed(args.seed)
 
-# Load data and generate meshes
-d = data_loader(pars['data_path'],pars['bath_path'],pars['train_frac'])
-data_train = []
-for i in range(d.n_train):
+    # Set up model
+    model = KernelNN(pars['model']['width'], pars['model']['kernel_width'], pars['model']['depth'], 3, in_width=5, out_width=1).to(device)
+    optimizer = torch.optim.Adam(model.parameters(), lr=pars['train']['learning_rate'], weight_decay=5e-4)
+    scheduler = torch.optim.lr_scheduler.StepLR(optimizer, step_size=pars['train']['scheduler_step'], gamma=pars['train']['scheduler_gamma'])
 
-    n = randintlog(pars['mesh']['n_min'],pars['mesh']['n_max'])
+    # Load data and generate meshes
+    d = data_loader(pars['data_path'],pars['bath_path'],pars['train_frac'])
 
-    data_train.append(d.sample_graph(n, i, radius=pars['mesh']['radius']))
+    print('Loading train samples')
+    @parfor(range(d.n_train))
+    def data_train(i):
+        n = randintlog(pars['mesh']['n_min'],pars['mesh']['n_max'])
+        return d.sample_graph(n, i, radius=pars['mesh']['radius'])
 
-    print(f'Train sample: {i} of {d.n_train}, Nodes: {n}, Edges: {data_train[-1].edge_index.shape[1]}')
+    print('Loading validation samples')
+    @parfor(range(d.n_val))
+    def data_val(i):
+        n = randintlog(pars['mesh']['n_min'],pars['mesh']['n_max'])
+        return d.sample_graph(n, i, radius=pars['mesh']['radius'],validation=True)
 
-data_val = []
-for i in range(d.n_val):
-
-    n = randintlog(pars['mesh']['n_min'],pars['mesh']['n_max'])
-
-    data_val.append(d.sample_graph(n, i, radius=pars['mesh']['radius'],validation=True))
-
-    print(f'Validation sample: {i} of {d.n_val}, Nodes: {n}, Edges: {data_val[-1].edge_index.shape[1]}')
-
-loader_train = DataLoader(data_train, batch_size=pars['train']['batch_size'], shuffle=True)
-loader_val = DataLoader(data_val, batch_size=pars['train']['batch_size'], shuffle=False)
+    loader_train = DataLoader(data_train, batch_size=pars['train']['batch_size'], shuffle=True)
+    loader_val = DataLoader(data_val, batch_size=pars['train']['batch_size'], shuffle=False)
 
 
-# -----------------------------------------
-# TRAINING
-ls = []
-start_time = time.time()
+    # -----------------------------------------
+    # TRAINING
+    ls = []
+    start_time = time.time()
 
-model.train()
+    model.train()
 
-loss_min = 1e10
-loss_min_epoch = 0
+    loss_min = 1e10
+    loss_min_epoch = 0
 
-for epoch in range(pars['train']['epochs']):
-    train_loss = 0.
-    val_loss = 0.
-    for batch in loader_train:
-        batch = batch.to(device)
-
-        optimizer.zero_grad()
-        out = model(batch)
-        loss = F.mse_loss(out.view(-1, 1), batch.y.view(-1, 1))
-        loss.backward()
-
-        optimizer.step()
-        train_loss += loss.item()/d.n_train
-
-    with torch.no_grad():
-        for batch in loader_val:
+    for epoch in range(pars['train']['epochs']):
+        train_loss = 0.
+        val_loss = 0.
+        for batch in loader_train:
             batch = batch.to(device)
 
+            optimizer.zero_grad()
             out = model(batch)
-            loss = F.mse_loss(out.view(-1, 1), batch.y.view(-1, 1))
+            loss = calc_loss(out,batch.y,batch.D_sea,pars['train']['distance_to_sea'])
+            loss.backward()
 
-            val_loss += loss.item()/d.n_val
+            optimizer.step()
+            train_loss += loss.item()/d.n_train
 
-    print(f'Epoch: {epoch}, Train_loss: {train_loss}, Validation_loss: {val_loss}')
+        with torch.no_grad():
+            for batch in loader_val:
+                batch = batch.to(device)
 
-    scheduler.step()
+                out = model(batch)
+                loss = calc_loss(out,batch.y,batch.D_sea,pars['train']['distance_to_sea'])
 
-    ls.append(train_loss)
+                val_loss += loss.item()/d.n_val
 
-    if (epoch+1)%10==0:
-        memory_use = torch.cuda.max_memory_allocated(device)/(1024*1024)
-        save_model(model, pars, ls, memory_use, start_time=start_time, seed=args.seed, comment=args.comment)
+        print(f'Epoch: {epoch}, Train_loss: {train_loss}, Validation_loss: {val_loss}')
 
-    if train_loss < loss_min:
-        loss_min = train_loss
-        loss_min_epoch = epoch
-    elif epoch - loss_min_epoch > pars['train']['patience']:
-        memory_use = torch.cuda.max_memory_allocated(device)/(1024*1024)
-        save_model(model, pars, ls, memory_use, start_time=start_time, seed=args.seed, comment=args.comment)
-        break
+        scheduler.step()
+
+        ls.append(train_loss)
+
+        if (epoch+1)%10==0:
+            memory_use = torch.cuda.max_memory_allocated(device)/(1024*1024)
+            save_model(model, pars, ls, memory_use, start_time=start_time, seed=args.seed, comment=args.comment)
+
+        if train_loss < loss_min:
+            loss_min = train_loss
+            loss_min_epoch = epoch
+        elif epoch - loss_min_epoch > pars['train']['patience']:
+            memory_use = torch.cuda.max_memory_allocated(device)/(1024*1024)
+            save_model(model, pars, ls, memory_use, start_time=start_time, seed=args.seed, comment=args.comment)
+            break

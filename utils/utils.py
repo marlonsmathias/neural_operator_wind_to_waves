@@ -9,6 +9,7 @@ import netCDF4
 import random
 import time
 from sklearn.metrics import pairwise_distances
+import torch.nn.functional as F
 
 def save_model(model, pars, ls, memory_use, start_time=None, save_path=None, epoch=None, seed=None, comment=''):
     if epoch is None:
@@ -22,7 +23,7 @@ def save_model(model, pars, ls, memory_use, start_time=None, save_path=None, epo
         seed_text = f'_s{seed}'
 
     if save_path is None:
-        save_path = f"models/model_nm{pars['mesh']['n_min']}_{pars['mesh']['n_max']}_r{pars['mesh']['radius']}_w{pars['model']['width']}_kw{pars['model']['kernel_width']}_d{pars['model']['depth']}{epoch_text}{seed_text}{comment}.pt"
+        save_path = f"models/model_nm{pars['mesh']['n_min']}_{pars['mesh']['n_max']}_ds{pars['train']['distance_to_sea']}_r{pars['mesh']['radius']}_w{pars['model']['width']}_kw{pars['model']['kernel_width']}_d{pars['model']['depth']}{epoch_text}{seed_text}{comment}.pt"
 
 
 
@@ -39,3 +40,8 @@ def randintlog(n1,n2):
     l2 = np.log(n2)
     r = l1 + (l2-l1)*random.random()
     return(int(np.exp(r)))
+
+def calc_loss(P,T,dist,dist_min):
+    P_inner = P.view(-1, 1)[dist > dist_min]
+    T_inner = T.view(-1, 1)[dist > dist_min]
+    return F.mse_loss(P_inner, T_inner)

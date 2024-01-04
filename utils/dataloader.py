@@ -24,9 +24,11 @@ class data_loader():
         ncdf = netCDF4.Dataset(path)
         ncdf_bath = netCDF4.Dataset(path_bath)
         n_cases = 2552
-        n_lat = 51
-        n_lon = 63
-        self.radius = 6371000 # Earth radius to convert lat and lon to meters
+        lat_i = 0
+        lat_f = 41 # maximum of 51. 41 goes up to -30º
+        lon_i = 0
+        lon_f = 63
+        self.radius = 6371 # Earth radius to convert lat and lon to kilometers
 
         n_train = int(n_cases*train_frac)
         inds = list(range(n_cases))
@@ -37,19 +39,20 @@ class data_loader():
         self.n_train = n_train
         self.n_val = n_cases-n_train
 
-        shww = np.array(ncdf['shww'])[:n_cases,0,:n_lat,:n_lon] #For some reason, goes only until 51,63. Lat and Lot seems to be wrong.
+        shww = np.array(ncdf['shww'])[:n_cases,0,lat_i:lat_f,lon_i:lon_f] #For some reason, goes only until 51,63. Lat and Lot seems to be wrong.
 
-        wind_u = np.array(ncdf['u10'])[:n_cases,0,:n_lat,:n_lon]
-        wind_v = np.array(ncdf['v10'])[:n_cases,0,:n_lat,:n_lon] 
-        bath = np.array(ncdf_bath['wmb'])[0,0,:,:]  # Bathymetry
+        wind_u = np.array(ncdf['u10'])[:n_cases,0,lat_i:lat_f,lon_i:lon_f]
+        wind_v = np.array(ncdf['v10'])[:n_cases,0,lat_i:lat_f,lon_i:lon_f] 
+        bath = np.array(ncdf_bath['wmb'])[0,0,lat_i:lat_f,lon_i:lon_f]  # Bathymetry
 
-        y = np.array(ncdf_bath['latitude']) # Lat Bathymetry
-        x = np.array(ncdf_bath['longitude']) # Lon Bathymetry
+        y = np.array(ncdf_bath['latitude'])[lat_i:lat_f] # Lat
+        x = np.array(ncdf_bath['longitude'])[lon_i:lon_f] # Lon 
 
         # Create mesh grid
         [self.y_grid, self.x_grid] = np.meshgrid(y,x)
 
-        n_grid = n_lat*n_lon
+
+        n_grid = (lat_f-lat_i)*(lon_f-lon_i)
         self.n_cases = n_cases
 
         self.lon = self.x_grid.flatten()
@@ -60,6 +63,10 @@ class data_loader():
         self.shww = shww.transpose(2,1,0).reshape((n_grid,self.n_cases))
 
         is_land = self.bath < 0
+
+        # Identify which points are next to open sea outside the domain
+        open_sea = (self.bath == max(self.bath)) * ((self.lon == max(self.lon)) + (self.lon == min(self.lon)) + (self.lat == max(self.lat)) + (self.lat == min(self.lat)))
+        self.sea_coords = np.stack((self.lat[open_sea],self.lon[open_sea]),axis=1)
 
         self.lon = np.delete(self.lon,is_land,axis=0)
         self.lat = np.delete(self.lat,is_land,axis=0)
@@ -102,11 +109,15 @@ class data_loader():
 
         shww = self.shww[vert_inds,case_ind]*self.shww_norm
 
-        F = np.stack((wind_u,wind_v,bath),axis=1)
+        F = np.stack((wind_u,wind_v,bath,lon,lat),axis=1)
         G = shww
-        X = np.stack((lon,lat),axis=1)
+        X = np.stack((lat,lon),axis=1)
 
         DS = pairwise_distances(np.radians(X), metric='haversine') * self.radius
+
+        # Distance from each point to open sea
+        D_sea = np.min(pairwise_distances(np.radians(X),np.radians(self.sea_coords), metric='haversine'),axis=1) * self.radius
+
         edge_index = np.zeros([0,2])
         edge_attributes = np.zeros([0,3])
 
@@ -129,6 +140,7 @@ class data_loader():
 
         return Data(x=torch.tensor(F, dtype=torch.float),
                     y=torch.tensor(G, dtype=torch.float),
+                    D_sea = torch.tensor(D_sea, dtype=torch.float),
                     edge_index=torch.tensor(edge_index, dtype=torch.long).t(),
                     edge_attr=torch.tensor(edge_attributes, dtype=torch.float),
                     coords=X)
