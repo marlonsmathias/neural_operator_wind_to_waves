@@ -1,8 +1,11 @@
 data/*
 models/*
+models_optimization/*
 wandb/*
 keys.sh
 slurm_out*
+*.pdf
+*.sh
 
 # Byte-compiled / optimized / DLL files
 __pycache__/

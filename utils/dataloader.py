@@ -15,7 +15,9 @@ device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
 class data_loader():
   
-    def __init__(self, path, path_bath, train_frac=0.8, seed=0):  
+    def __init__(self, path, path_bath, train_frac=0.8, seed=0, n_cases=None, lat_i=0, lat_f=41, lon_i=0, lon_f=63):  
+
+        #n_cases = 2552
 
         # Set random seed
         if seed is not None:
@@ -23,26 +25,31 @@ class data_loader():
 
         ncdf = netCDF4.Dataset(path)
         ncdf_bath = netCDF4.Dataset(path_bath)
-        n_cases = 2552
+        self.radius = 6371 # Earth radius to convert lat and lon to kilometers
         lat_i = 0
         lat_f = 41 # maximum of 51. 41 goes up to -30º
         lon_i = 0
         lon_f = 63
-        self.radius = 6371 # Earth radius to convert lat and lon to kilometers
+        total_cases = 2552
+
+        if n_cases is None:
+            n_cases = total_cases
 
         n_train = int(n_cases*train_frac)
-        inds = list(range(n_cases))
+        n_val = n_cases-n_train
+
+        inds = list(range(total_cases))
         random.shuffle(inds)
         self.ind_train = inds[:n_train]
-        self.ind_val = inds[n_train:]
+        self.ind_val = inds[n_train:n_train+n_val]
 
         self.n_train = n_train
-        self.n_val = n_cases-n_train
+        self.n_val = n_val
 
-        shww = np.array(ncdf['shww'])[:n_cases,0,lat_i:lat_f,lon_i:lon_f] #For some reason, goes only until 51,63. Lat and Lot seems to be wrong.
+        shww = np.array(ncdf['shww'])[:total_cases,0,lat_i:lat_f,lon_i:lon_f] #For some reason, goes only until 51,63. Lat and Lot seems to be wrong.
 
-        wind_u = np.array(ncdf['u10'])[:n_cases,0,lat_i:lat_f,lon_i:lon_f]
-        wind_v = np.array(ncdf['v10'])[:n_cases,0,lat_i:lat_f,lon_i:lon_f] 
+        wind_u = np.array(ncdf['u10'])[:total_cases,0,lat_i:lat_f,lon_i:lon_f]
+        wind_v = np.array(ncdf['v10'])[:total_cases,0,lat_i:lat_f,lon_i:lon_f] 
         bath = np.array(ncdf_bath['wmb'])[0,0,lat_i:lat_f,lon_i:lon_f]  # Bathymetry
 
         y = np.array(ncdf_bath['latitude'])[lat_i:lat_f] # Lat
@@ -57,10 +64,10 @@ class data_loader():
 
         self.lon = self.x_grid.flatten()
         self.lat = self.y_grid.flatten()
-        self.wind_u = wind_u.transpose(2,1,0).reshape((n_grid,self.n_cases))
-        self.wind_v = wind_v.transpose(2,1,0).reshape((n_grid,self.n_cases))
+        self.wind_u = wind_u.transpose(2,1,0).reshape((n_grid,total_cases))
+        self.wind_v = wind_v.transpose(2,1,0).reshape((n_grid,total_cases))
         self.bath = bath.transpose(1,0).flatten()
-        self.shww = shww.transpose(2,1,0).reshape((n_grid,self.n_cases))
+        self.shww = shww.transpose(2,1,0).reshape((n_grid,total_cases))
 
         is_land = self.bath < 0
 
