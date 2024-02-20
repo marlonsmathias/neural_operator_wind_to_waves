@@ -34,32 +34,32 @@ def get_args():
     
     parser.add_argument('--mesh_n_min',
                         type=int,
-                        default=500,
+                        default=600,
                         help='Number of mesh points')
 
     parser.add_argument('--mesh_n_max',
                         type=int,
-                        default=1000,
+                        default=1250,
                         help='Number of mesh points')
 
     parser.add_argument('--radius',
                         type=float,
-                        default=300.,
+                        default=350.,
                         help='Maximum edge length in the graph')
 
     parser.add_argument('--model_width',
                         type=int,
-                        default=10,
+                        default=20,
                         help='')
 
     parser.add_argument('--model_kernel_width',
                         type=int,
-                        default=20,
+                        default=40,
                         help='')
 
     parser.add_argument('--model_depth',
                         type=int,
-                        default=4,
+                        default=8,
                         help='')
     
     parser.add_argument('--epochs',
@@ -89,17 +89,22 @@ def get_args():
 
     parser.add_argument('--lr',
                         type=float,
-                        default=1e-2,
+                        default=1e-3,
                         help='Learning rate for the optimization algorithm')
 
     parser.add_argument('--scheduler_step',
                         type=int,
-                        default=100,
+                        default=1e6,
+                        help='')
+    
+    parser.add_argument('--reload_samples',
+                        type=int,
+                        default=None,
                         help='')
 
     parser.add_argument('--scheduler_gamma',
                         type=float,
-                        default=0.9,
+                        default=0.5,
                         help='')
 
     parser.add_argument('--dev',
@@ -117,6 +122,11 @@ def get_args():
                     default='',
                     help='String to be added at the end of the model file name')
     
+    parser.add_argument('--n_cases',
+                    type=int,
+                    default=None,
+                    help='Number of total cases used in training - Defaults to all 2552 cases')
+    
     args = parser.parse_args()
     
     return args
@@ -125,6 +135,8 @@ def get_args():
 # PARAMETERS
 
 if __name__ == '__main__':
+
+    num_workers = 16
 
     args = get_args()
     pars = dict()
@@ -147,13 +159,15 @@ if __name__ == '__main__':
 
     # Training
     pars['train'] = {
+        'n_cases' : args.n_cases,
         'distance_to_sea' : args.distance_to_sea,
         'batch_size': args.batch_size,
         'epochs': args.epochs,
         'patience': args.patience,
         'learning_rate': args.lr,
         'scheduler_step': args.scheduler_step,
-        'scheduler_gamma': args.scheduler_gamma}
+        'scheduler_gamma': args.scheduler_gamma,
+        'reload_samples': args.reload_samples}
 
     device = args.dev
 
@@ -170,7 +184,7 @@ if __name__ == '__main__':
     scheduler = torch.optim.lr_scheduler.StepLR(optimizer, step_size=pars['train']['scheduler_step'], gamma=pars['train']['scheduler_gamma'])
 
     # Load data and generate meshes
-    d = data_loader(pars['data_path'],pars['bath_path'],pars['train_frac'])
+    d = data_loader(pars['data_path'],pars['bath_path'],pars['train_frac'], n_cases=pars['train']['n_cases'])
 
     print('Loading train samples')
     @parfor(range(d.n_train))
@@ -191,6 +205,7 @@ if __name__ == '__main__':
     # -----------------------------------------
     # TRAINING
     ls = []
+    ls_val = []
     start_time = time.time()
 
     model.train()
@@ -226,15 +241,25 @@ if __name__ == '__main__':
         scheduler.step()
 
         ls.append(train_loss)
+        ls_val.append(val_loss)
+
+        if (pars['train']['reload_samples'] is not None) and ((epoch+1)%pars['train']['reload_samples']==0):
+            print('Loading train samples')
+            @parfor(range(d.n_train))
+            def data_train(i):
+                n = randintlog(pars['mesh']['n_min'],pars['mesh']['n_max'])
+                return d.sample_graph(n, i, radius=pars['mesh']['radius'])
+
+            loader_train = DataLoader(data_train, batch_size=pars['train']['batch_size'], shuffle=True)
 
         if (epoch+1)%10==0:
             memory_use = torch.cuda.max_memory_allocated(device)/(1024*1024)
-            save_model(model, pars, ls, memory_use, start_time=start_time, seed=args.seed, comment=args.comment)
+            save_model(model, pars, ls, ls_val, memory_use, start_time=start_time, seed=args.seed, comment=args.comment)
 
         if train_loss < loss_min:
             loss_min = train_loss
             loss_min_epoch = epoch
         elif epoch - loss_min_epoch > pars['train']['patience']:
             memory_use = torch.cuda.max_memory_allocated(device)/(1024*1024)
-            save_model(model, pars, ls, memory_use, start_time=start_time, seed=args.seed, comment=args.comment)
+            save_model(model, pars, ls, ls_val, memory_use, start_time=start_time, seed=args.seed, comment=args.comment)
             break

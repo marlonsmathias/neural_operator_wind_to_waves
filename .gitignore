@@ -1,7 +1,9 @@
 data/*
 models/*
-wandb/*
 models_optimization/*
+wandb/*
+keys.sh
+slurm_out*
 *.pdf
 *.sh
 

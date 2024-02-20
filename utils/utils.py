@@ -11,7 +11,7 @@ import time
 from sklearn.metrics import pairwise_distances
 import torch.nn.functional as F
 
-def save_model(model, pars, ls, memory_use, start_time=None, save_path=None, epoch=None, seed=None, comment=''):
+def save_model(model, pars, ls, ls_val, memory_use, start_time=None, save_path=None, epoch=None, seed=None, comment=''):
     if epoch is None:
         epoch_text = ''
     else:
@@ -22,8 +22,18 @@ def save_model(model, pars, ls, memory_use, start_time=None, save_path=None, epo
     else:
         seed_text = f'_s{seed}'
 
+    if pars['train']['n_cases'] is None:
+        ncases_text = ''
+    else:
+        ncases_text = f'_nc{pars["train"]["n_cases"]}'
+
+    if pars['train']['reload_samples'] is None:
+        reload_text = ''
+    else:
+        reload_text = f'_rl{pars["train"]["reload_samples"]}'
+
     if save_path is None:
-        save_path = f"models/model_nm{pars['mesh']['n_min']}_{pars['mesh']['n_max']}_ds{pars['train']['distance_to_sea']}_r{pars['mesh']['radius']}_w{pars['model']['width']}_kw{pars['model']['kernel_width']}_d{pars['model']['depth']}{epoch_text}{seed_text}{comment}.pt"
+        save_path = f"models/model_nm{pars['mesh']['n_min']}_{pars['mesh']['n_max']}_ds{pars['train']['distance_to_sea']}_r{pars['mesh']['radius']}_w{pars['model']['width']}_kw{pars['model']['kernel_width']}_d{pars['model']['depth']}{ncases_text}{reload_text}{epoch_text}{seed_text}{comment}.pt"
 
 
 
@@ -32,7 +42,7 @@ def save_model(model, pars, ls, memory_use, start_time=None, save_path=None, epo
     else:
         run_time = time.time()-start_time
 
-    torch.save({'model': model.state_dict(), 'pars':pars, 'loss':ls, 'time':run_time, 'memory':memory_use}, save_path)
+    torch.save({'model': model.state_dict(), 'pars':pars, 'loss':ls, 'loss_val':ls_val, 'time':run_time, 'memory':memory_use}, save_path)
 
 def randintlog(n1,n2):
     # Random integer between n1 and n2 with logarithmic distribution

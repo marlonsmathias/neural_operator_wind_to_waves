@@ -1,0 +1,38 @@
+command:
+   - ${env}
+   - python3
+   - tune_hyperparameters.py
+   - ${args}
+early_terminate:
+  min_iter: 20
+  type: hyperband
+method: bayes
+metric:
+  goal: minimize
+  name: val_loss
+name: sweep
+parameters:
+  lr10:
+    distribution: uniform
+    max: -1.0
+    min: -4.0
+  mesh_n_max:
+    distribution: int_uniform
+    max: 2000
+    min: 500
+  mesh_radius:
+    distribution: uniform
+    max: 500.
+    min: 100.
+  model_depth:
+    distribution: int_uniform
+    max: 8
+    min: 1
+  model_kernel_width:
+    distribution: int_uniform
+    max: 64
+    min: 10
+  model_width:
+    distribution: int_uniform
+    max: 64
+    min: 10
