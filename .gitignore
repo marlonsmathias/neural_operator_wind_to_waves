@@ -1,5 +1,9 @@
 data/*
 models/*
+wandb/*
+models_optimization/*
+*.pdf
+*.sh
 
 # Byte-compiled / optimized / DLL files
 __pycache__/
