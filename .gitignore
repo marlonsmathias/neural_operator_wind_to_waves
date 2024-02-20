@@ -6,6 +6,7 @@ keys.sh
 slurm_out*
 *.pdf
 *.sh
+nopww
 
 # Byte-compiled / optimized / DLL files
 __pycache__/
